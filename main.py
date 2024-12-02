@@ -1,4 +1,4 @@
-from libaries import general as gl
+from allib import general as gl
 import numpy as np
 import matplotlib.pyplot as plt
 
