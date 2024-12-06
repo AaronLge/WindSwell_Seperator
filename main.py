@@ -1,130 +1,312 @@
 from allib import general as gl
-import numpy as np
-import matplotlib.pyplot as plt
+from allib import hindtoolcalc as hc_calc
+from allib import hindtoolplot as hc_plt
 
+# %% Startup Block
+import os
+import argparse
+import inspect
+import datetime
+import shutil
+import pandas as pd
+
+script_name = os.path.basename(__file__)
+
+parser = argparse.ArgumentParser(description=script_name)
+parser.add_argument('-i', metavar='path_in', required=False, type=str, default='Input.txt',
+                    help='the filepath to the input file, if empty "Input.txt"')
+parser.add_argument('-o', metavar='path_out', required=False, type=str,
+                    help='the filepath to the output dir, if empty, taken from Input file')
+
+args = parser.parse_args()
+
+path_in = args.i
+
+filename = inspect.getframeinfo(inspect.currentframe()).filename
+path_main = os.path.dirname(os.path.abspath(filename))
+
+print(f"reading Inputfile ({path_in})...")
+
+INPUT = gl.read_input_txt(path_in)
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+if args.o is None:
+    if INPUT['General']['dir_name'] is None:
+        path_out = os.path.abspath(INPUT['General']['path_out']) + '\\HindCast_' + timestamp + '\\'
+    else:
+        path_out = os.path.abspath(INPUT['General']['path_out']) + '\\' + INPUT['General']['dir_name'] + '\\'
+
+else:
+    path_out = os.path.abspath(args.o) + '/'
+
+print(f"Path_out = {path_out}")
+
+if not os.path.exists(path_out):
+    os.makedirs(path_out)
+
+shutil.copy(path_in, path_out + 'Input.txt')
+
+# %% program specific
 # Database and output configurations
-db_path = "C:/Users/aaron.lange/Desktop/Projekte/HindcastArchive/4_54.96112_6.254773_NIRAS/54.96112_6.254773_NIRAS.db"
+db_path = INPUT["General"]["db_path"]
 table_name = 'Hind_combined'
-column_names = ["Wind speed 10m LAT [m/s]", "Wind direction  10m LAT [degN-CF]", "Hs [m]", "Tp [s]", "Mean Wave Direction [degN-CF]"]
-path_out = "C:/Users/aaron.lange/Desktop/Projekte/Hindcast_Tool/WindSwell_Seperator/test_3/"
 
-# Load data
-df = gl.export_df_from_sql(db_path, table_name, column_names=column_names)
-df = df.dropna(how='any')
+columnnames = list(INPUT["ColumNames"].values())
+# %% calculate
+print("calculate...")
+beta_range = INPUT["Parameters"]["beta"]
+# alpha_range = INPUT["Parameters"]["alpha"]
 
-# Function to separate wind swell
-def separate_wind_swell(T_p, v_m, dir_wave, dir_wind, water_depth, h_vm, alpha, beta):
-
-    omega = 2 * np.pi / T_p
-    k = gl.k_aus_omega(omega, water_depth)
-    c = omega / k
-    indizes_swell = []
-    indizes_wind = []
-
-    v_m = h_vm * v_m
-
-    for T_p_curr, v_m_curr, dir_wave_curr, dir_wind_curr, c_curr, index in zip(
-        T_p.values, v_m.values, dir_wave.values, dir_wind.values, c.values, T_p.index
-    ):
-        dir_wave_curr = dir_wave_curr * 2 * np.pi / 360
-        dir_wind_curr = dir_wind_curr * 2 * np.pi / 360
-        beta_compare = v_m_curr / c_curr * (np.cos(dir_wave_curr - dir_wind_curr))**alpha
-
-        if beta_compare < beta:
-            indizes_swell.append(index)
-        else:
-            indizes_wind.append(index)
-
-    return indizes_swell, indizes_wind
-
-# Parameters for alpha and beta
-#alpha_range = np.linspace(0.1, 2, 20)  # Adjust range and number of elements
-beta_range = np.linspace(0.6, 1.3, 10)
-alpha = 2
-# Data columns
-T_p = df["Tp [s]"]
-H_s = df["Hs [m]"]
-dir_wave = df["Mean Wave Direction [degN-CF]"]
-dir_wind = df["Wind direction  10m LAT [degN-CF]"]
-v_m = df["Wind speed 10m LAT [m/s]"]
-
-# Loop over alpha and beta combinations
-#for alpha in alpha_range:
+Data_Out = {}
+# for alpha in alpha_range:
 for beta in beta_range:
-    print(f"{alpha}, {beta}")
-    indizes_swell, indizes_wind = separate_wind_swell(
-        T_p, v_m, dir_wave, dir_wind, 50, 150, alpha, beta
+
+    print(f'   beta = {beta}')
+    Calc = hc_calc.Calculation()
+    df = Calc.initilize_from_db(db_path, table_name, columnnames)
+
+    Calc.add_filter(mode='nans')
+    Calc.apply_filters()
+
+    T_p = df[INPUT["ColumNames"]["T_p"]]
+    H_s = df[INPUT["ColumNames"]["H_s"]]
+    dir_wave = df[INPUT["ColumNames"]["dir_T_mean"]]
+    dir_wind = df[INPUT["ColumNames"]["dir_v_m"]]
+    v_m = df[INPUT["ColumNames"]["v_m"]]
+
+    indizes_swell, indizes_wind, rating = gl.separate_wind_swell(
+        T_p, v_m, dir_wave, dir_wind, INPUT["Parameters"]["d"], None, 1, beta
     )
 
-    T_p_wind = T_p.loc[indizes_wind]
-    T_p_swell = T_p.loc[indizes_swell]
+    result = {}
 
-    v_m_wind = v_m.loc[indizes_wind]
-    v_m_swell = v_m.loc[indizes_swell]
+    result['indizes_swell'] = indizes_swell
+    result['indizes_wind'] = indizes_wind
+    result['rating'] = rating
+    result['parameters'] = {'beta': beta}
 
-    H_s_wind = H_s.loc[indizes_wind]
-    H_s_swell = H_s.loc[indizes_swell]
+    Seg = hc_calc.Segment(0, angles=None,
+                          result=result,
+                          angle_name=None,
+                          colnames={'Hs': H_s.name, 'Tp': T_p.name, 'vm': v_m.name},
+                          indizes=list(df.index))
 
-    fig = plt.figure(figsize=(10, 12))
-    fig.suptitle("sepration of wind swell" + "\n" + f"with alpha {alpha} and beta {beta}", fontsize=16)
+    Calc.result = [Seg]
 
-    ax1 = fig.add_subplot(3, 2, 1)
-    c = gl.c_scatterplot(H_s_wind, T_p_wind)
-    ax1.scatter(H_s_wind, T_p_wind, c=v_m_wind, s=2)
-    ax1.set_xlabel(H_s_wind.name)
-    ax1.set_ylabel(T_p_wind.name)
-    ax1.set_title(f"wind sea portion of points: {round(len(indizes_wind) / len(T_p) * 100)}")
-    ax1.set_xlim(min(H_s), max(H_s))
-    ax1.set_ylim(min(T_p), max(T_p))
+    Data_Out[f"beta={beta}"] = Calc
 
-    ax2 = fig.add_subplot(3, 2, 3)
-    c = gl.c_scatterplot(H_s_swell, T_p_swell)
-    ax2.scatter(H_s_swell, T_p_swell, c=v_m_swell, s=2)
-    ax2.set_xlabel(H_s_swell.name)
-    ax2.set_ylabel(T_p_swell.name)
-    ax2.set_title(f"swell sea portion of points: {round(len(indizes_swell) / len(T_p) * 100)}")
-    ax2.set_xlim(min(H_s), max(H_s))
-    ax2.set_ylim(min(T_p), max(T_p))
+# %% write to DB
+if INPUT["General"]["write_to_db"]:
+    print("write to database...")
 
-    ax3 = fig.add_subplot(3, 2, 5)
-    c = gl.c_scatterplot(H_s, T_p)
-    ax3.scatter(H_s, T_p, c=v_m, s=2)
-    ax3.set_xlabel(H_s.name)
-    ax3.set_ylabel(T_p.name)
-    ax3.set_title(f"total")
-    ax3.set_xlim(min(H_s), max(H_s))
-    ax3.set_ylim(min(T_p), max(T_p))
+    for Calc_name, Calc in Data_Out.items():
+        Seg = Calc.result[0]
 
-    # VMHS
-    ax4 = fig.add_subplot(3, 2, 2)
-    c = gl.c_scatterplot(v_m_wind, H_s_wind)
-    ax4.scatter(v_m_wind, H_s_wind, c=c, s=2)
-    ax4.set_xlabel(v_m_wind.name)
-    ax4.set_ylabel(H_s_wind.name)
-    ax4.set_title(f"wind sea portion of points: {round(len(indizes_wind) / len(T_p) * 100)}")
-    ax4.set_xlim(min(v_m), max(v_m))
-    ax4.set_ylim(min(H_s), max(H_s))
+        Tiles = []
 
-    ax5 = fig.add_subplot(3, 2, 4)
-    c = gl.c_scatterplot(v_m_swell, H_s_swell)
-    ax5.scatter(v_m_swell, H_s_swell, c=c, s=2)
-    ax5.set_xlabel(v_m_swell.name)
-    ax5.set_ylabel(H_s_swell.name)
-    ax5.set_title(f"swell sea portion of points: {round(len(indizes_swell) / len(T_p) * 100)}")
-    ax5.set_xlim(min(v_m), max(v_m))
-    ax5.set_ylim(min(H_s), max(H_s))
+        df = Calc.load_from_db(colnames_ini=True)
+        T_p = df[INPUT["ColumNames"]["T_p"]]
+        H_s = df[INPUT["ColumNames"]["H_s"]]
+        v_m = df[INPUT["ColumNames"]["v_m"]]
+        titels = Calc.create_segment_title()
 
-    ax6 = fig.add_subplot(3, 2, 6)
-    c = gl.c_scatterplot(v_m, H_s)
-    ax6.scatter(v_m, H_s, c=c, s=2)
-    ax6.set_xlabel(v_m.name)
-    ax6.set_ylabel(H_s.name)
-    ax6.set_title(f"total sea")
-    ax6.set_xlim(min(v_m), max(v_m))
-    ax6.set_ylim(min(H_s), max(H_s))
+        T_p_wind = T_p.loc[Seg.result["indizes_wind"]]
+        T_p_wind.name = f"T_p_wind, WaveAge, beta={Seg.result['parameters']['beta']}"
 
-    plt.tight_layout()
+        T_p_swell = T_p.loc[Seg.result["indizes_swell"]]
+        T_p_swell.name = f"T_p_swell, WaveAge, beta={Seg.result['parameters']['beta']}"
 
-    gl.save_figs_as_png([fig], path_out + f'alpha={alpha:.2f}_beta={beta:.2f}', dpi=300)
+        H_s_wind = H_s.loc[Seg.result["indizes_wind"]]
+        H_s_wind.name = f"H_s_wind, WaveAge, beta={Seg.result['parameters']['beta']}"
 
+        H_s_swell = H_s.loc[Seg.result["indizes_swell"]]
+        H_s_swell.name = f"H_s_swell, WaveAge, beta={Seg.result['parameters']['beta']}"
 
+        df = pd.concat([T_p_wind, T_p_swell, H_s_wind, H_s_swell], axis=1, join='outer')
+
+        gl.add_dataframe_to_db(db_path, "Hind_combined", df)
+        gl.add_dataframe_to_db(db_path, "Hind_raw_WindSwell_Seperation", df)
+
+    META = gl.export_df_from_sql(db_path, "Hind_MetaData")
+    META.loc["WindSwell_Seperation", "Source"] = "JBO intern preprocessing"
+    META.loc["WindSwell_Seperation", "Date created"] = str(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    META.loc["WindSwell_Seperation", "Water Depth"] = INPUT["Parameters"]["d"]
+    META.loc["WindSwell_Seperation", "Start Date"] = str(df.index[0])
+    META.loc["WindSwell_Seperation", "End Date"] = str(df.index[-1])
+    META.loc["WindSwell_Seperation", "Time Step"] = (df.index[1] - df.index[0]).total_seconds()
+    META.loc["WindSwell_Seperation", "Number of samples"] = len(df)
+
+    gl.add_dataframe_to_db(db_path, "Hind_MetaData", META)
+
+# %% Plot
+if INPUT["General"]["plot"]:
+    print("plot...")
+    figsize_fullpage = [size * 0.39370079 for size in INPUT["General"].get("writing_box", {})]
+    figsize_fullpage_caption = [figsize_fullpage[0], figsize_fullpage[1] * 0.9]
+
+    figsize_halfpage = [figsize_fullpage[0], figsize_fullpage[1] / 2.5]
+    figsize_thirdpage = [figsize_fullpage[0], figsize_fullpage[1] / 3]
+    figsize_twothirdpage = [figsize_fullpage[0], figsize_fullpage[1] / 1.5]
+    figsize_halfpage_halfpage = [figsize_fullpage[0] / 2, figsize_fullpage[1] / 2.5]
+
+    for Calc_name, Calc in Data_Out.items():
+        print(f"    {Calc_name}")
+        Seg = Calc.result[0]
+
+        Tiles = []
+
+        df = Calc.load_from_db(colnames_ini=True)
+        T_p = df[INPUT["ColumNames"]["T_p"]]
+        H_s = df[INPUT["ColumNames"]["H_s"]]
+        v_m = df[INPUT["ColumNames"]["v_m"]]
+
+        titels = Calc.create_segment_title()
+
+        T_p_wind = T_p.loc[Seg.result["indizes_wind"]].values
+        T_p_swell = T_p.loc[Seg.result["indizes_swell"]].values
+
+        v_m_wind = v_m.loc[Seg.result["indizes_wind"]].values
+        v_m_swell = v_m.loc[Seg.result["indizes_swell"]].values
+
+        H_s_wind = H_s.loc[Seg.result["indizes_wind"]].values
+        H_s_swell = H_s.loc[Seg.result["indizes_swell"]].values
+
+        rating = Seg.result["rating"]
+
+        # hstp wind
+        tile_hstp_wind = hc_plt.Tile(num=1,
+                                     x_label=INPUT["Aliase"]["H_s_wind"],
+                                     y_label=INPUT["Aliase"]["T_p_wind"],
+                                     title=f"$T_p(H_s)$ Wind sea, {round(len(H_s_wind) / len(H_s) * 100, 1)} \\%")
+
+        scatter = hc_plt.Scatter(x=H_s_wind,
+                                 y=T_p_wind,
+                                 size=5,
+                                 cmap='cool',
+                                 cmap_norm='sqrt')
+
+        tile_hstp_wind.add_scatter(scatter)
+        Tiles.append(tile_hstp_wind)
+
+        # vmHs wind
+        tile_vmhs_wind = hc_plt.Tile(num=1,
+                                     x_label=INPUT["Aliase"]["v_m"],
+                                     y_label=INPUT["Aliase"]["H_s_wind"],
+                                     title=f"$H_s(v_m)$ Wind sea, {round(len(H_s_wind) / len(H_s) * 100, 1)} \\%")
+
+        scatter = hc_plt.Scatter(x=v_m_wind,
+                                 y=H_s_wind,
+                                 size=5,
+                                 cmap='cool',
+                                 cmap_norm='sqrt')
+
+        tile_vmhs_wind.add_scatter(scatter)
+        Tiles.append(tile_vmhs_wind)
+
+        # hstp swell
+        tile_hstp_swell = hc_plt.Tile(num=1,
+                                      x_label=INPUT["Aliase"]["H_s_swell"],
+                                     y_label=INPUT["Aliase"]["T_p_swell"],
+                                     title=f"$T_p(H_s)$ Swell sea, {round(len(H_s_swell) / len(H_s) * 100, 1)} \\%")
+
+        scatter = hc_plt.Scatter(x=H_s_swell,
+                                 y=T_p_swell,
+                                 size=5,
+                                 cmap='cool',
+                                 cmap_norm='sqrt')
+
+        tile_hstp_swell.add_scatter(scatter)
+        Tiles.append(tile_hstp_swell)
+
+        # vmhs swell
+        tile_vmhs_swell = hc_plt.Tile(num=1,
+                                      x_label=INPUT["Aliase"]["v_m"],
+                                     y_label=INPUT["Aliase"]["H_s_wind"],
+                                     title=f"$H_s(v_m)$ Swell sea, {round(len(H_s_swell) / len(H_s) * 100, 1)} \\%")
+
+        scatter = hc_plt.Scatter(x=v_m_swell,
+                                 y=H_s_swell,
+                                 size=5,
+                                 cmap='cool',
+                                 cmap_norm='sqrt')
+
+        tile_vmhs_swell.add_scatter(scatter)
+        Tiles.append(tile_vmhs_swell)
+
+        FIG = hc_plt.plot_tiled(Tiles, global_max=[None, None], grid=[2,2], global_min=[0, 0], figsize=figsize_twothirdpage, use_pgf=False)
+        gl.save_figs_as_png(FIG, path_out + Calc_name + '_wind_swell', dpi=300)
+
+        Tiles = []
+        # hstp total
+        tile_hstp_total = hc_plt.Tile(num=1,
+                                      x_label=INPUT["Aliase"]["H_s"],
+                                      y_label=INPUT["Aliase"]["T_p"],
+                                      title=f"$T_p(H_s)$ Total sea")
+
+        scatter = hc_plt.Scatter(x=H_s.values,
+                                 y=T_p.values,
+                                 size=5,
+                                 cmap='cool',
+                                 cmap_norm='sqrt')
+
+        tile_hstp_total.add_scatter(scatter)
+        Tiles.append(tile_hstp_total)
+
+        # vmhs total
+        tile_vmhs_total = hc_plt.Tile(num=1,
+                                      x_label=INPUT["Aliase"]["v_m"],
+                                      y_label=INPUT["Aliase"]["H_s"],
+                                      title=f"$H_s(v_m)$ Total sea")
+
+        scatter = hc_plt.Scatter(x=v_m.values,
+                                 y=H_s.values,
+                                 size=5,
+                                 cmap='cool',
+                                 cmap_norm='sqrt')
+
+        tile_vmhs_total.add_scatter(scatter)
+        Tiles.append(tile_vmhs_total)
+
+        # hstp rating
+        tile_hstp_rating = hc_plt.Tile(num=1,
+                                       x_label=INPUT["Aliase"]["H_s"],
+                                      y_label=INPUT["Aliase"]["T_p"],
+                                      title=f"$T_p(H_s)$ Total sea, wave age criterion",
+                                       scatter_min=0)
+
+        scatter = hc_plt.Scatter(x=H_s.values,
+                                 y=T_p.values,
+                                 size=5,
+                                 cmap_mode='manual',
+                                 c=rating,
+                                 cmap='cool',
+                                 alpha=0.5,
+                                 cbar=True,
+                                 cbar_label="$\\beta = \\frac{U_{10}}{c} \cos \left(\\theta-\\theta_w\\right)$")
+
+        cbar_extraticks = [(Seg.result["parameters"]["beta"], 'beta')]
+        tile_hstp_rating.add_scatter(scatter)
+        Tiles.append(tile_hstp_rating)
+
+        # vmhs rating
+        tile_vmhs_rating = hc_plt.Tile(num=1,
+                                       x_label=INPUT["Aliase"]["v_m"],
+                                      y_label=INPUT["Aliase"]["H_s"],
+                                      title=f"$H_s(v_m)$ Total sea, wave age criterion",
+                                       scatter_min=0)
+
+        scatter = hc_plt.Scatter(x=v_m.values,
+                                 y=H_s.values,
+                                 size=5,
+                                 cmap_mode='manual',
+                                 c=rating,
+                                 cmap='cool',
+                                 alpha=0.5,
+                                 cbar=True,
+                                 cbar_label="$\\beta=\\frac{U_{10}}{c} \cos \left(\\theta-\\theta_w\\right)$")
+
+        tile_vmhs_rating.add_scatter(scatter)
+        Tiles.append(tile_vmhs_rating)
+
+        FIG = hc_plt.plot_tiled(Tiles, global_max=[None, None], global_min=[0, 0], grid=[2,2], scatter_max=None, scatter_min=None, figsize=figsize_twothirdpage, use_pgf=False)
+        gl.save_figs_as_png(FIG, path_out + Calc_name + '_rating', dpi=300)

@@ -1,0 +1,35 @@
+*General*
+path_in				>	"Input.txt"
+dir_name			>	'beta_range'
+path_out 			>	".\Data_Out"
+
+db_path 			> 	"C:/Users/aaron.lange/Desktop/Projekte/HindcastArchive/4_54.96112_6.254773_NIRAS/54.96112_6.254773_NIRAS.db"
+
+write_to_db 		>	False
+plot				>	True
+writing_box					>		[17, 22]
+
+
+*ColumNames*
+T_p 				> "Tp [s]"
+H_s 				> "Hs [m]"
+dir_T_mean 			> "Mean Wave Direction [degN-CF]"
+dir_v_m 			> "Wind direction  10m LAT [degN-CF]"
+v_m 				> "Wind speed 10m LAT [m/s]"
+
+*Aliase*
+T_p							>		"Peak wave Period, total sea [s]"
+H_s							>		"Significant wave height, total sea [m]"
+v_m 						>	 	"Wind speed at 150m over MSL [m/s]"
+dir_v_m 					> 		"Wind direction at 10m over MSL [deg]"
+dir_T_mean					>		"Mean wave direction, total sea [deg]"
+T_p_wind					>		"Peak wave Period, wind sea [s]"
+H_s_wind					>		"Significant wave height, wind sea [m]"
+T_p_swell					>		"Peak wave Period, swell sea [s]"
+H_s_swell					>		"Significant wave height, swell sea [m]"
+	
+*Parameters*
+beta 				> [0.7, 0.75, 0.8, 0.85, 0.9]
+d 					> 42.63
+
+
