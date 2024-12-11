@@ -1,6 +1,7 @@
 from allib import general as gl
 from allib import hindtoolcalc as hc_calc
 from allib import hindtoolplot as hc_plt
+from allib import latex as ltx
 
 # %% Startup Block
 import os
@@ -9,6 +10,7 @@ import inspect
 import datetime
 import shutil
 import pandas as pd
+pd.options.mode.chained_assignment = None  # default='warn'
 
 script_name = os.path.basename(__file__)
 
@@ -53,47 +55,50 @@ table_name = 'Hind_combined'
 
 columnnames = list(INPUT["ColumNames"].values())
 # %% calculate
-print("calculate...")
-beta_range = INPUT["Parameters"]["beta"]
-# alpha_range = INPUT["Parameters"]["alpha"]
 
-Data_Out = {}
-# for alpha in alpha_range:
-for beta in beta_range:
+if INPUT['General']['calculate']:
 
-    print(f'   beta = {beta}')
-    Calc = hc_calc.Calculation()
-    df = Calc.initilize_from_db(db_path, table_name, columnnames)
+    print("calculate...")
+    beta_range = INPUT["Parameters"]["beta"]
+    # alpha_range = INPUT["Parameters"]["alpha"]
 
-    Calc.add_filter(mode='nans')
-    Calc.apply_filters()
+    Data_Out = {}
+    # for alpha in alpha_range:
+    for beta in beta_range:
 
-    T_p = df[INPUT["ColumNames"]["T_p"]]
-    H_s = df[INPUT["ColumNames"]["H_s"]]
-    dir_wave = df[INPUT["ColumNames"]["dir_T_mean"]]
-    dir_wind = df[INPUT["ColumNames"]["dir_v_m"]]
-    v_m = df[INPUT["ColumNames"]["v_m"]]
+        print(f'   beta = {beta}')
+        Calc = hc_calc.Calculation()
+        df = Calc.initilize_from_db(db_path, table_name, columnnames)
 
-    indizes_swell, indizes_wind, rating = gl.separate_wind_swell(
-        T_p, v_m, dir_wave, dir_wind, INPUT["Parameters"]["d"], None, 1, beta
-    )
+        Calc.add_filter(mode='nans')
+        Calc.apply_filters()
 
-    result = {}
+        T_p = df[INPUT["ColumNames"]["T_p"]]
+        H_s = df[INPUT["ColumNames"]["H_s"]]
+        dir_wave = df[INPUT["ColumNames"]["dir_T_mean"]]
+        dir_wind = df[INPUT["ColumNames"]["dir_v_m"]]
+        v_m = df[INPUT["ColumNames"]["v_m"]]
 
-    result['indizes_swell'] = indizes_swell
-    result['indizes_wind'] = indizes_wind
-    result['rating'] = rating
-    result['parameters'] = {'beta': beta}
+        indizes_swell, indizes_wind, rating = gl.separate_wind_swell(
+            T_p, v_m, dir_wave, dir_wind, INPUT["Parameters"]["d"], None, 1, beta
+        )
 
-    Seg = hc_calc.Segment(0, angles=None,
-                          result=result,
-                          angle_name=None,
-                          colnames={'Hs': H_s.name, 'Tp': T_p.name, 'vm': v_m.name},
-                          indizes=list(df.index))
+        result = {}
 
-    Calc.result = [Seg]
+        result['indizes_swell'] = indizes_swell
+        result['indizes_wind'] = indizes_wind
+        result['rating'] = rating
+        result['parameters'] = {'beta': beta}
 
-    Data_Out[f"beta={beta}"] = Calc
+        Seg = hc_calc.Segment(0, angles=None,
+                              result=result,
+                              angle_name=None,
+                              colnames={'Hs': H_s.name, 'Tp': T_p.name, 'vm': v_m.name},
+                              indizes=list(df.index))
+
+        Calc.result = [Seg]
+
+        Data_Out[f"beta={beta}"] = Calc
 
 # %% write to DB
 if INPUT["General"]["write_to_db"]:
@@ -271,7 +276,7 @@ if INPUT["General"]["plot"]:
         tile_hstp_rating = hc_plt.Tile(num=1,
                                        x_label=INPUT["Aliase"]["H_s"],
                                       y_label=INPUT["Aliase"]["T_p"],
-                                      title=f"$T_p(H_s)$ Total sea, wave age criterion",
+                                      title=f"$T_p(H_s)$ Total sea, wave age criterion $\\beta$",
                                        scatter_min=0)
 
         scatter = hc_plt.Scatter(x=H_s.values,
@@ -292,7 +297,7 @@ if INPUT["General"]["plot"]:
         tile_vmhs_rating = hc_plt.Tile(num=1,
                                        x_label=INPUT["Aliase"]["v_m"],
                                       y_label=INPUT["Aliase"]["H_s"],
-                                      title=f"$H_s(v_m)$ Total sea, wave age criterion",
+                                      title=f"$H_s(v_m)$ Total sea, wave age criterion $\\beta$",
                                        scatter_min=0)
 
         scatter = hc_plt.Scatter(x=v_m.values,
@@ -310,3 +315,50 @@ if INPUT["General"]["plot"]:
 
         FIG = hc_plt.plot_tiled(Tiles, global_max=[None, None], global_min=[0, 0], grid=[2,2], scatter_max=None, scatter_min=None, figsize=figsize_twothirdpage, use_pgf=False)
         gl.save_figs_as_png(FIG, path_out + Calc_name + '_rating', dpi=300)
+
+
+
+
+# %% Report
+if INPUT["General"]["Report"]:
+
+    # Create Report Output
+    path_report = path_out + "report"
+    try:
+        # Create the new folder
+        os.makedirs(path_report, exist_ok=True)  # exist_ok=True prevents an error if the folder already exists
+        print(f"Folder created successfully at: {path_report}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    TEMPLATES = ltx.load_templates(os.path.abspath(".\\latex_templates"))
+
+    # load figures in Dataframe (from output dir or optional dir)
+    if INPUT["General"]["fig_path"] is not None:
+        path_figs = os.path.abspath(INPUT["General"]["fig_path"])
+    else:
+        path_figs = os.path.abspath(path_out)
+
+    FIGURES = ltx.load_figures(path_figs)
+
+    TEX = {}
+    # Data Basis
+    chapter = 'WindSwellSeperation'
+
+    TEX[chapter] = TEMPLATES[chapter]
+
+    TEX[chapter] = ltx.insertLatexVars(TEX[chapter], {'beta': INPUT["Parameters"]["beta_report"],
+                                                      'd': INPUT["Parameters"]["d"]})
+
+    Fig_rating = FIGURES.loc[f"beta={INPUT['Parameters']['beta_report']}_rating_page_1"]
+    Fig_rating["caption"] = "total sea density and wave age $\\beta$"
+
+    Fig_wind_swell = FIGURES.loc[f"beta={INPUT['Parameters']['beta_report']}_wind_swell_page_1"]
+    Fig_wind_swell["caption"] = "wind - swell seperation"
+
+    TEX[chapter] = ltx.include_Fig(TEX[chapter], Fig_rating)
+    TEX[chapter] = ltx.include_Fig(TEX[chapter], Fig_wind_swell)
+
+    for name, tex in TEX.items():
+        with open(path_report + r'\\' + name + '.tex', 'w', encoding='utf-8') as file:
+            file.write(tex)

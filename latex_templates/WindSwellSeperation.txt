@@ -1,0 +1,14 @@
+\subsection{Annex ?NumAnnex: Wind swell separation on the basis of the wave age criterion}
+
+Because of the not sufficient separation of wind sea and swell sea in the data provided (\cite{MetConditions}) which was conducted only depending on the Peak Wave Period $T_p$ the resulting condensation of the $T_p(H_s)$ and $H_s(v_m)$ was not suitable for extracting conclusive sea states. For this reason, the wave age criterion (\cite{Zheng24}) was used, to sort the provided total sea spectra’s into wind- and swell sea. \\
+The wave age method described among other things in \cite{Zheng24} uses the full directional spectra of a surface elevation timeseries to separate wind – and swell sea components by defining a wave as part of swell sea if it satisfies the condition: 
+\begin{align}
+\\beta > \frac{U_{10}}{c} \cos{(\theta-\theta_w)}
+\end{align}
+Here, $U_{10}$ is the wind speed at 10m LAT, $c$ the phase speed of the wave, $\theta$ the wave direction, $\\theta_w$ the wind direction and $\beta$ the variable calibration factor for controlling the separation. 
+Doing this for the whole directional spectra of the total sea, two new spectra can be derived and defined as wind – and swell sea. These can be approximated by a JONSWAP spectrum, resulting in total, wind and swell sea spectral parameters $H_s$, $T_p$ and $\gamma$. \\
+
+As the data provided only contains the already simplified total sea state parameters $H_s$ (Significant wave height), $T_p$ (Peak wave period) and $\omega$ (wave direction), in addition to the Wind direction $\omega_w$ for each timestep, no separation into wind and swell sea components can be conducted for each timestep. Because of that, each total sea spectra is categorized as a whole as wind- or swell sea by calculating the phase speed $c$ from the peak wave period $T_p$ by solving the linear dispersion equation (with a waterdepth $d$ of $?d$). With that, the wave age criterion described above can be calculated for each wave spectrum. In figure \ref{fig:?FigureRating}, the total sea is plotted in top as a density plot and in the bottom the wave age criterion $\beta$ for each sea state is shown. Note, that $\beta$ below 0 is cut off from the colormap as these values imply a very large wind-wave misalignment (outside of $+-\frac{\pi}{2}$) and are categorized as swell all the time. With an appropriate $\beta$ value of ?beta, which is chosen by trial and error, the separation is conducted (see figure \ref{fig:?FigureWindSwell}). 
+
+?FIG 
+?FIG
